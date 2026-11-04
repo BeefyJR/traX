@@ -5,6 +5,8 @@
 <title>Tracks</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0b0c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{--bg:#f6f6f4;--surf:#ffffff;--surf2:#ececea;--text:#111;--mute:#77777a;--acc:#ff5a36;--line:#e2e2df;--ac:255,90,54;--bgc:246,246,244;--sfc:255,255,255;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0b0c;--surf:#161618;--surf2:#222225;--text:#f2f2f0;--mute:#8d8d92;--line:#262629;--bgc:11,11,12;--sfc:22,22,24}}
@@ -600,12 +602,12 @@ function parseTok(){
 }
 async function token(inter){
   if(CL.tok&&Date.now()<CL.exp-60000)return CL.tok;
-  if(!cid())throw new Error('Add your Google client ID first');
+  if(!cid())throw new Error('Session expired. Paste a new token or add your client ID');
   if(!inter)throw new Error('reconnect');
   location.href='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:cid(),redirect_uri:redir(),response_type:'token',scope:'https://www.googleapis.com/auth/drive.file'});
   return new Promise(()=>{});
 }
-async function gapi(url,o={}){const t=await token(false);const r=await fetch(url,{...o,headers:{...(o.headers||{}),Authorization:'Bearer '+t}});if(!r.ok)throw new Error('Drive '+r.status);return r}
+async function gapi(url,o={}){const t=await token(false);const r=await fetch(url,{...o,headers:{...(o.headers||{}),Authorization:'Bearer '+t}});if(r.status===401){CL.tok=null;LS('tracks-tok',null);throw new Error('Token expired. Paste a new one')}if(!r.ok)throw new Error('Drive '+r.status);return r}
 async function dUp(name,blob,type,id){
   type=type||'application/octet-stream';
   const r=await gapi(DU+(id?'/'+id:'')+'?uploadType=resumable&fields=id',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json','X-Upload-Content-Type':type},body:JSON.stringify(id?{}:{name,parents:[CL.fid]})});
@@ -681,12 +683,15 @@ async function cloudDownloadAll(){
 }
 function cloudSheet(){
   const on=LS('tracks-cloud'),miss=songs.filter(s=>!s.blob).length;
-  openOv(`<h3>Google Drive</h3><p id="cst" style="margin:0 0 12px;color:var(--mute);font-size:14px">${esc(CL.st||(on?'Connected':'Not connected'))}</p>${on?`<p id="cdl" style="margin:0 0 12px;color:var(--mute);font-size:14px">${songs.length-miss} of ${songs.length} songs saved on this device</p>`:''}${GCID?'':`<input type="text" id="cidi" placeholder="Google OAuth client ID" value="${esc(cid())}" style="margin-bottom:12px">`}<div class="bt">${on?'<button class="pill" id="cx">Disconnect</button>':''}${on&&miss?`<button class="pill" id="cdb">Download all (${miss})</button>`:''}<button class="pill acc" id="cg">${on?'Sync now':'Connect'}</button></div>`);
+  openOv(`<h3>Google Drive</h3><p id="cst" style="margin:0 0 12px;color:var(--mute);font-size:14px">${esc(CL.st||(on?'Connected':'Not connected'))}</p>${on?`<p id="cdl" style="margin:0 0 12px;color:var(--mute);font-size:14px">${songs.length-miss} of ${songs.length} songs saved on this device</p>`:''}${GCID?'':`<input type="text" id="cidi" placeholder="Google OAuth client ID" value="${esc(cid())}" style="margin-bottom:12px">`}<div style="margin:0 0 12px"><p style="margin:0 0 8px;color:var(--mute);font-size:13px">Inside a wrapper app Google blocks sign-in. Sign in at your site in a browser, tap Copy token, and paste it here.</p><input type="text" id="ctk" placeholder="Paste access token" style="margin-bottom:8px"><button class="pill" id="cuse">Use token</button></div><div class="bt">${CL.tok&&Date.now()<CL.exp-60000?'<button class="pill" id="cct">Copy token</button>':''}${on?'<button class="pill" id="cx">Disconnect</button>':''}${on&&miss?`<button class="pill" id="cdb">Download all (${miss})</button>`:''}<button class="pill acc" id="cg">${on?'Sync now':'Connect'}</button></div>`);
   $('#cg').onclick=()=>{const i=$('#cidi');if(i)LS('tracks-cid',i.value.trim());cloudSync(true)};
   const d=$('#cdb');if(d)d.onclick=cloudDownloadAll;
+  const cc=$('#cct');if(cc)cc.onclick=()=>navigator.clipboard.writeText(CL.tok).then(()=>cloudSt('Token copied, valid for about 1 hour'),()=>cloudSt('Could not copy'));
+  $('#cuse').onclick=()=>{const v=$('#ctk').value.trim().replace(/^Bearer\s+/i,'');if(v.length<20)return cloudSt('Paste the token first');CL.tok=v;CL.exp=Date.now()+55*60000;LS('tracks-tok',JSON.stringify({t:v,e:CL.exp}));cloudSync(false)};
   const x=$('#cx');if(x)x.onclick=()=>{LS('tracks-cloud',null);CL.tok=null;closeOv();cloudSt('Not connected')};
 }
 
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 /* helpers */
 const albumOf=s=>albums.find(a=>a.id===s.album);
 const songCover=s=>{if(s.cover)return {cover:s.cover,name:s.name};const a=albumOf(s);if(s.color&&!(a&&a.cover))return {name:(a&&a.name)||s.name,color:s.color};return a||{name:s.name}};
@@ -1519,7 +1524,7 @@ function ui(){
   songs.sort((a,b)=>a.added-b.added);
   ui();applyBg();render();
   $('#plus').insertAdjacentHTML('afterend',`<button class="ib" id="cb" data-act="cloud" aria-label="Google Drive sync" style="margin-left:10px;margin-right:auto">${ic('cloud',24)}</button>`);
-  parseTok();if(LS('tracks-cloud')){cloudSt('Connected');cloudSync(false)}
+  parseTok();if(LS('tracks-cloud')){cloudSt('Connected');if(navigator.onLine)cloudSync(false)}
   if(!db)toast('Storage unavailable, songs last until you close this page');
   for(const o of [...songs,...albums]){
     if(o.cover&&!o.ccol){const c=await colorFromUrl(o.cover);if(c){o.ccol=c;await put(songs.includes(o)?'songs':'albums',o)}}
