@@ -662,17 +662,28 @@ async function cloudSync(inter){
   }catch(e){cloudSt(inter||CL.tok?'Sync failed: '+e.message:'Tap to reconnect')}
   CL.busy=false;if(CL.again){CL.again=false;setTimeout(()=>cloudSync(false),500)}
 }
-async function cloudFetch(s){
-  await token(true);
+async function cloudFetch(s,inter=true){
+  await token(inter);
   if(!CL.idx['a_'+s.id])await dIdx();
   if(!CL.idx['a_'+s.id])throw new Error('Song not found in Drive');
   s.blob=await (await gapi(DV+'/'+CL.idx['a_'+s.id]+'?alt=media')).blob();
   await tx('songs','readwrite',x=>x.put(s));
 }
+async function cloudDownloadAll(){
+  if(CL.dl)return;CL.dl=true;const set=m=>{const e=$('#cdl');if(e)e.textContent=m};
+  try{
+    await token(false);await dIdx();
+    const todo=songs.filter(s=>!s.blob);let n=0,bad=0;
+    for(const s of todo){set('Downloading '+(++n)+' of '+todo.length+'…');try{await cloudFetch(s,false)}catch(e){if(e.message==='reconnect')throw e;bad++}}
+    set(bad?'Done, '+bad+' song(s) could not be downloaded':'All songs are saved for offline play');
+  }catch(e){set(e.message==='reconnect'?'Session expired. Press Sync now, then try again':'Download stopped: '+e.message)}
+  CL.dl=false;
+}
 function cloudSheet(){
-  const on=LS('tracks-cloud');
-  openOv(`<h3>Google Drive</h3><p id="cst" style="margin:0 0 12px;color:var(--mute);font-size:14px">${esc(CL.st||(on?'Connected':'Not connected'))}</p>${GCID?'':`<input type="text" id="cidi" placeholder="Google OAuth client ID" value="${esc(cid())}" style="margin-bottom:12px">`}<div class="bt">${on?'<button class="pill" id="cx">Disconnect</button>':''}<button class="pill acc" id="cg">${on?'Sync now':'Connect'}</button></div>`);
+  const on=LS('tracks-cloud'),miss=songs.filter(s=>!s.blob).length;
+  openOv(`<h3>Google Drive</h3><p id="cst" style="margin:0 0 12px;color:var(--mute);font-size:14px">${esc(CL.st||(on?'Connected':'Not connected'))}</p>${on?`<p id="cdl" style="margin:0 0 12px;color:var(--mute);font-size:14px">${songs.length-miss} of ${songs.length} songs saved on this device</p>`:''}${GCID?'':`<input type="text" id="cidi" placeholder="Google OAuth client ID" value="${esc(cid())}" style="margin-bottom:12px">`}<div class="bt">${on?'<button class="pill" id="cx">Disconnect</button>':''}${on&&miss?`<button class="pill" id="cdb">Download all (${miss})</button>`:''}<button class="pill acc" id="cg">${on?'Sync now':'Connect'}</button></div>`);
   $('#cg').onclick=()=>{const i=$('#cidi');if(i)LS('tracks-cid',i.value.trim());cloudSync(true)};
+  const d=$('#cdb');if(d)d.onclick=cloudDownloadAll;
   const x=$('#cx');if(x)x.onclick=()=>{LS('tracks-cloud',null);CL.tok=null;closeOv();cloudSt('Not connected')};
 }
 
@@ -1507,7 +1518,7 @@ function ui(){
   try{db=await openDB();songs=(await tx('songs','readonly',s=>s.getAll()))||[];albums=(await tx('albums','readonly',s=>s.getAll()))||[];folders=(await tx('folders','readonly',s=>s.getAll()))||[]}catch(e){db=null}
   songs.sort((a,b)=>a.added-b.added);
   ui();applyBg();render();
-  $('#theme').insertAdjacentHTML('beforebegin',`<button class="ib" id="cb" data-act="cloud" aria-label="Google Drive sync" style="margin-left:auto;margin-right:10px">${ic('cloud',24)}</button>`);
+  $('#plus').insertAdjacentHTML('afterend',`<button class="ib" id="cb" data-act="cloud" aria-label="Google Drive sync" style="margin-left:10px;margin-right:auto">${ic('cloud',24)}</button>`);
   parseTok();if(LS('tracks-cloud')){cloudSt('Connected');cloudSync(false)}
   if(!db)toast('Storage unavailable, songs last until you close this page');
   for(const o of [...songs,...albums]){
